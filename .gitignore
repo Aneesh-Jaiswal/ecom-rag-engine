@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Env
+.env
+!.env.example
+
+# Vector DB
+chroma_db/
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+.coverage
+coverage.xml
+htmlcov/

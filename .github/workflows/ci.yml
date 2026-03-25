@@ -1,0 +1,169 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BACKEND: ${{ github.repository }}/backend
+  IMAGE_FRONTEND: ${{ github.repository }}/frontend
+
+jobs:
+  # ── Backend Tests ──────────────────────────────────────
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          REDIS_URL: redis://localhost:6379
+          ENV: testing
+        run: |
+          cd backend
+          pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: backend/coverage.xml
+
+  # ── Frontend Build ─────────────────────────────────────
+  build-frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install & Build
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+  # ── Docker Build & Push ────────────────────────────────
+  docker:
+    name: Docker Build & Push
+    needs: [test-backend, build-frontend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./infra/docker/Dockerfile.backend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_BACKEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./infra/docker/Dockerfile.frontend
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_FRONTEND }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── RAG Evaluation ────────────────────────────────────
+  evaluate-rag:
+    name: RAG Quality Gate
+    needs: docker
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install eval dependencies
+        run: pip install ragas datasets httpx mlflow
+
+      - name: Run RAGAS evaluation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: python ml/evaluation/evaluate_rag.py
+
+      - name: Assert quality thresholds
+        run: |
+          python - <<'EOF'
+          import json
+          with open("/tmp/eval_results.json") as f:
+              scores = json.load(f)
+          thresholds = {
+              "faithfulness": 0.80,
+              "answer_relevancy": 0.75,
+              "context_precision": 0.70,
+          }
+          failed = []
+          for metric, threshold in thresholds.items():
+              val = float(scores.get(metric, 0))
+              status = "✅" if val >= threshold else "❌"
+              print(f"{status} {metric}: {val:.3f} (min: {threshold})")
+              if val < threshold:
+                  failed.append(metric)
+          if failed:
+              raise SystemExit(f"Quality gate FAILED for: {failed}")
+          print("✅ All quality gates passed!")
+          EOF

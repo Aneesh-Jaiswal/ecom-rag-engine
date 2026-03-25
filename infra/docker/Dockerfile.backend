@@ -1,0 +1,17 @@
+FROM python:3.11-slim AS builder
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+    && pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+FROM python:3.11-slim AS runtime
+LABEL maintainer="ecom-rag-engine"
+LABEL version="1.0.0"
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+WORKDIR /app
+COPY --from=builder /install /usr/local
+COPY --chown=appuser:appgroup . .
+RUN mkdir -p /app/chroma_db && chown -R appuser:appgroup /app/chroma_db
+USER appuser
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
