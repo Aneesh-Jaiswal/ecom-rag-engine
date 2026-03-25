@@ -8,8 +8,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_BACKEND: ${{ github.repository }}/backend
-  IMAGE_FRONTEND: ${{ github.repository }}/frontend
+  IMAGE_BACKEND: ${{ github.repository_owner }}/ecom-rag-engine/backend
+  IMAGE_FRONTEND: ${{ github.repository_owner }}/ecom-rag-engine/frontend
 
 jobs:
   test-backend:
@@ -83,6 +83,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set lowercase image names
+        run: |
+          echo "IMAGE_BACKEND=ghcr.io/$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')/ecom-rag-engine/backend" >> $GITHUB_ENV
+          echo "IMAGE_FRONTEND=ghcr.io/$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')/ecom-rag-engine/frontend" >> $GITHUB_ENV
 
       - name: Login to GHCR
         uses: docker/login-action@v3
