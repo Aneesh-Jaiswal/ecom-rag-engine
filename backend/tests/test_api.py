@@ -5,11 +5,9 @@ Run: pytest tests/ -v
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock, patch
-import sys
+from unittest.mock import AsyncMock, patch
 import os
 
-# ── Env setup before importing app ────────────────────────
 os.environ.setdefault("OPENAI_API_KEY", "sk-test-key")
 os.environ.setdefault("ENV", "testing")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
@@ -44,7 +42,6 @@ def mock_rag_response():
     )
 
 
-# ── Health ────────────────────────────────────────────────
 class TestHealth:
     def test_health_returns_200(self, client):
         resp = client.get("/api/v1/health")
@@ -62,7 +59,6 @@ class TestHealth:
         assert resp.json()["version"] == "1.0.0"
 
 
-# ── Chat ──────────────────────────────────────────────────
 class TestChat:
     @patch("app.api.routes.chat.RAGPipeline")
     def test_chat_valid_request(self, mock_pipeline_cls, client, mock_rag_response):
@@ -82,17 +78,15 @@ class TestChat:
 
     def test_chat_empty_question_rejected(self, client):
         resp = client.post("/api/v1/chat", json={"question": " "})
-        assert resp.status_code == 422  # Validation error
+        assert resp.status_code == 422
 
     def test_chat_question_too_long_rejected(self, client):
         resp = client.post("/api/v1/chat", json={"question": "x" * 1001})
         assert resp.status_code == 422
 
 
-# ── Products ──────────────────────────────────────────────
 class TestProducts:
-    @patch("app.api.routes.products.VectorStoreManager")
-    def test_ingest_products(self, mock_vs_cls, client):
+    def test_ingest_products(self, client):
         mock_vs = AsyncMock()
         mock_vs.ingest_products.return_value = 12
         client.app.state.vector_store = mock_vs
@@ -111,12 +105,10 @@ class TestProducts:
         assert resp.json()["ingested_count"] == 1
 
     def test_stats_returns_dict(self, client):
-        # Vector store mock is set in lifespan
         resp = client.get("/api/v1/products/stats")
-        assert resp.status_code in [200, 500]  # 500 ok in test env without real VS
+        assert resp.status_code in [200, 500]
 
 
-# ── Schema validation ─────────────────────────────────────
 class TestSchemas:
     def test_chat_request_strips_whitespace(self):
         from app.models.schemas import ChatRequest
